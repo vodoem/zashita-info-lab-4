@@ -5,6 +5,7 @@ import java.awt.*;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
+import java.security.SecureRandom;
 
 public class PoligHellmanGUI extends JFrame {
 
@@ -14,6 +15,8 @@ public class PoligHellmanGUI extends JFrame {
 
     private final JTextArea plainTextArea;
     private final JTextArea cipherTextArea;
+
+    private final SecureRandom random = new SecureRandom();
 
     public PoligHellmanGUI() {
         setTitle("Схема шифрования Полига–Хеллмана");
@@ -89,6 +92,8 @@ public class PoligHellmanGUI extends JFrame {
         JButton encryptButton = new JButton("Зашифровать  P → C");
         JButton decryptButton = new JButton("Расшифровать C → P");
         JButton clearButton   = new JButton("Очистить");
+        JButton validateButton = new JButton("Проверить ключи");
+        JButton generateButton = new JButton("Сгенерировать e, d, n");
 
         encryptButton.addActionListener(e -> encryptAction());
         decryptButton.addActionListener(e -> decryptAction());
@@ -96,11 +101,21 @@ public class PoligHellmanGUI extends JFrame {
             plainTextArea.setText("");
             cipherTextArea.setText("");
         });
+        validateButton.addActionListener(e -> {
+            try {
+                validateKeys(true);
+            } catch (Exception ex) {
+                showError(ex.getMessage());
+            }
+        });
+        generateButton.addActionListener(e -> generateKeys());
 
         JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         buttonsPanel.add(encryptButton);
         buttonsPanel.add(decryptButton);
         buttonsPanel.add(clearButton);
+        buttonsPanel.add(validateButton);
+        buttonsPanel.add(generateButton);
 
         root.add(buttonsPanel, BorderLayout.SOUTH);
 
@@ -110,8 +125,9 @@ public class PoligHellmanGUI extends JFrame {
 
     private void encryptAction() {
         try {
-            BigInteger eVal = parseBigInteger(eField.getText(), "e");
-            BigInteger nVal = parseBigInteger(nField.getText(), "n");
+            KeySet keys = validateKeys(false);
+            BigInteger eVal = keys.e();
+            BigInteger nVal = keys.n();
 
             List<BigInteger> blocks = parseBlocks(plainTextArea.getText());
             List<BigInteger> result = new ArrayList<>();
@@ -130,8 +146,9 @@ public class PoligHellmanGUI extends JFrame {
 
     private void decryptAction() {
         try {
-            BigInteger dVal = parseBigInteger(dField.getText(), "d");
-            BigInteger nVal = parseBigInteger(nField.getText(), "n");
+            KeySet keys = validateKeys(false);
+            BigInteger dVal = keys.d();
+            BigInteger nVal = keys.n();
 
             List<BigInteger> blocks = parseBlocks(cipherTextArea.getText());
             List<BigInteger> result = new ArrayList<>();
@@ -231,6 +248,85 @@ public class PoligHellmanGUI extends JFrame {
                 JOptionPane.ERROR_MESSAGE
         );
     }
+
+    private KeySet validateKeys(boolean showSuccess) {
+        BigInteger eVal = parseBigInteger(eField.getText(), "e");
+        BigInteger dVal = parseBigInteger(dField.getText(), "d");
+        BigInteger nVal = parseBigInteger(nField.getText(), "n");
+
+        if (eVal.compareTo(BigInteger.ONE) <= 0 || dVal.compareTo(BigInteger.ONE) <= 0) {
+            throw new IllegalArgumentException("Параметры e и d должны быть больше 1.");
+        }
+        if (nVal.compareTo(BigInteger.TWO) <= 0) {
+            throw new IllegalArgumentException("Модуль n должен быть больше 2.");
+        }
+        if (!nVal.isProbablePrime(20)) {
+            throw new IllegalArgumentException("n должно быть простым числом.");
+        }
+
+        BigInteger phi = nVal.subtract(BigInteger.ONE);
+        if (eVal.compareTo(phi) >= 0) {
+            throw new IllegalArgumentException("e должно быть меньше n-1.");
+        }
+        if (dVal.compareTo(phi) >= 0) {
+            throw new IllegalArgumentException("d должно быть меньше n-1.");
+        }
+
+        if (!eVal.gcd(phi).equals(BigInteger.ONE)) {
+            throw new IllegalArgumentException("e и n-1 должны быть взаимно простыми.");
+        }
+
+        if (!eVal.multiply(dVal).mod(phi).equals(BigInteger.ONE)) {
+            throw new IllegalArgumentException("e*d по модулю (n-1) должно быть равно 1.");
+        }
+
+        if (showSuccess) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Ключи корректны. Вектор проверки: e*d mod (n-1) = 1 при n = " + nVal + '.',
+                    "Проверка ключей",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+        }
+
+        return new KeySet(eVal, dVal, nVal, phi);
+    }
+
+    private void generateKeys() {
+        BigInteger nVal = BigInteger.probablePrime(12, random);
+        BigInteger phi = nVal.subtract(BigInteger.ONE);
+
+        BigInteger eVal;
+        do {
+            eVal = new BigInteger(phi.bitLength(), random);
+            if (eVal.compareTo(BigInteger.TWO) < 0) {
+                eVal = eVal.add(BigInteger.TWO);
+            }
+            eVal = eVal.mod(phi);
+            if (eVal.compareTo(BigInteger.TWO) < 0) {
+                eVal = eVal.add(BigInteger.TWO);
+            }
+        } while (!eVal.gcd(phi).equals(BigInteger.ONE));
+
+        BigInteger dVal = eVal.modInverse(phi);
+
+        eField.setText(eVal.toString());
+        dField.setText(dVal.toString());
+        nField.setText(nVal.toString());
+
+        JOptionPane.showMessageDialog(
+                this,
+                "Набор параметров сгенерирован:\n" +
+                        "n (простое) = " + nVal + '\n' +
+                        "e = " + eVal + '\n' +
+                        "d = " + dVal + '\n' +
+                        "Проверка: e*d mod (n-1) = 1",
+                "Параметры сгенерированы",
+                JOptionPane.INFORMATION_MESSAGE
+        );
+    }
+
+    private record KeySet(BigInteger e, BigInteger d, BigInteger n, BigInteger phi) {}
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
