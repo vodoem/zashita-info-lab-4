@@ -3,9 +3,8 @@ package ru.rsreu;
 import javax.swing.*;
 import java.awt.*;
 import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.List;
 import java.security.SecureRandom;
+import java.util.List;
 
 public class PoligHellmanGUI extends JFrame {
 
@@ -101,13 +100,7 @@ public class PoligHellmanGUI extends JFrame {
             plainTextArea.setText("");
             cipherTextArea.setText("");
         });
-        validateButton.addActionListener(e -> {
-            try {
-                validateKeys(true);
-            } catch (Exception ex) {
-                showError(ex.getMessage());
-            }
-        });
+        validateButton.addActionListener(e -> runKeyValidation(true));
         generateButton.addActionListener(e -> generateKeys());
 
         JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
@@ -125,20 +118,10 @@ public class PoligHellmanGUI extends JFrame {
 
     private void encryptAction() {
         try {
-            KeySet keys = validateKeys(false);
-            BigInteger eVal = keys.e();
-            BigInteger nVal = keys.n();
-
-            List<BigInteger> blocks = parseBlocks(plainTextArea.getText());
-            List<BigInteger> result = new ArrayList<>();
-
-            for (BigInteger block : blocks) {
-                checkBlock(block, nVal);
-                // Ci = Pi^e (mod n)
-                result.add(block.modPow(eVal, nVal));
-            }
-
-            cipherTextArea.setText(joinBlocks(result));
+            KeySet keys = runKeyValidation(false);
+            List<BigInteger> blocks = BlockParser.parseBlocks(plainTextArea.getText());
+            List<BigInteger> result = PolyHellmanCipher.encrypt(blocks, keys);
+            cipherTextArea.setText(BlockParser.joinBlocks(result));
         } catch (Exception ex) {
             showError(ex.getMessage());
         }
@@ -146,75 +129,32 @@ public class PoligHellmanGUI extends JFrame {
 
     private void decryptAction() {
         try {
-            KeySet keys = validateKeys(false);
-            BigInteger dVal = keys.d();
-            BigInteger nVal = keys.n();
-
-            List<BigInteger> blocks = parseBlocks(cipherTextArea.getText());
-            List<BigInteger> result = new ArrayList<>();
-
-            for (BigInteger block : blocks) {
-                checkBlock(block, nVal);
-                // Pi = Ci^d (mod n)
-                result.add(block.modPow(dVal, nVal));
-            }
-
-            plainTextArea.setText(joinBlocks(result));
+            KeySet keys = runKeyValidation(false);
+            List<BigInteger> blocks = BlockParser.parseBlocks(cipherTextArea.getText());
+            List<BigInteger> result = PolyHellmanCipher.decrypt(blocks, keys);
+            plainTextArea.setText(BlockParser.joinBlocks(result));
         } catch (Exception ex) {
             showError(ex.getMessage());
         }
     }
 
-    // Разбор строки с числами в список BigInteger
-    // Поддерживает два варианта:
-    // 1) "1 5 7"  -> блоки [1, 5, 7]
-    // 2) "794341" -> блоки [7, 9, 4, 3, 4, 1] (каждая цифра — отдельный блок)
-    private List<BigInteger> parseBlocks(String text) {
-        String trimmed = text.trim();
-        if (trimmed.isEmpty()) {
-            throw new IllegalArgumentException("Введите сообщение (числа P или C).");
-        }
+    private KeySet runKeyValidation(boolean showSuccess) {
+        KeySet keySet = KeyValidator.validate(
+                parseBigInteger(eField.getText(), "e"),
+                parseBigInteger(dField.getText(), "d"),
+                parseBigInteger(nField.getText(), "n")
+        );
 
-        String normalized = trimmed
-                .replace(',', ' ')
-                .replace(';', ' ')
-                .replace('\n', ' ')
-                .replace('\r', ' ')
-                .trim()
-                .replaceAll("\\s+", " ");
-
-        String[] tokens = normalized.split(" ");
-        List<BigInteger> blocks = new ArrayList<>();
-
-        if (tokens.length == 1 && tokens[0].matches("\\d+")) {
-            // одна "слитная" строка цифр -> шифруем / расшифровываем по одной цифре
-            String s = tokens[0];
-            for (int i = 0; i < s.length(); i++) {
-                char ch = s.charAt(i);
-                blocks.add(new BigInteger(String.valueOf(ch)));
-            }
-        } else {
-            for (String token : tokens) {
-                if (!token.isEmpty()) {
-                    blocks.add(new BigInteger(token));
-                }
-            }
-        }
-
-        return blocks;
-    }
-
-    // Проверка, что блок корректен для модуля n
-    private void checkBlock(BigInteger block, BigInteger n) {
-        if (block.signum() < 0) {
-            throw new IllegalArgumentException("Блоки сообщения должны быть неотрицательными числами.");
-        }
-        if (block.compareTo(n) >= 0) {
-            throw new IllegalArgumentException(
-                    "Каждый блок Pi / Ci должен быть меньше модуля n.\n" +
-                            "Найден блок: " + block + ", модуль n: " + n
+        if (showSuccess) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Ключи корректны. Вектор проверки: e*d mod (n-1) = 1 при n = " + keySet.n() + '.',
+                    "Проверка ключей",
+                    JOptionPane.INFORMATION_MESSAGE
             );
         }
+
+        return keySet;
     }
 
     private BigInteger parseBigInteger(String text, String name) {
@@ -229,17 +169,6 @@ public class PoligHellmanGUI extends JFrame {
         }
     }
 
-    private String joinBlocks(List<BigInteger> blocks) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < blocks.size(); i++) {
-            if (i > 0) {
-                sb.append(' ');
-            }
-            sb.append(blocks.get(i).toString());
-        }
-        return sb.toString();
-    }
-
     private void showError(String message) {
         JOptionPane.showMessageDialog(
                 this,
@@ -249,84 +178,23 @@ public class PoligHellmanGUI extends JFrame {
         );
     }
 
-    private KeySet validateKeys(boolean showSuccess) {
-        BigInteger eVal = parseBigInteger(eField.getText(), "e");
-        BigInteger dVal = parseBigInteger(dField.getText(), "d");
-        BigInteger nVal = parseBigInteger(nField.getText(), "n");
-
-        if (eVal.compareTo(BigInteger.ONE) <= 0 || dVal.compareTo(BigInteger.ONE) <= 0) {
-            throw new IllegalArgumentException("Параметры e и d должны быть больше 1.");
-        }
-        if (nVal.compareTo(BigInteger.TWO) <= 0) {
-            throw new IllegalArgumentException("Модуль n должен быть больше 2.");
-        }
-        if (!nVal.isProbablePrime(20)) {
-            throw new IllegalArgumentException("n должно быть простым числом.");
-        }
-
-        BigInteger phi = nVal.subtract(BigInteger.ONE);
-        if (eVal.compareTo(phi) >= 0) {
-            throw new IllegalArgumentException("e должно быть меньше n-1.");
-        }
-        if (dVal.compareTo(phi) >= 0) {
-            throw new IllegalArgumentException("d должно быть меньше n-1.");
-        }
-
-        if (!eVal.gcd(phi).equals(BigInteger.ONE)) {
-            throw new IllegalArgumentException("e и n-1 должны быть взаимно простыми.");
-        }
-
-        if (!eVal.multiply(dVal).mod(phi).equals(BigInteger.ONE)) {
-            throw new IllegalArgumentException("e*d по модулю (n-1) должно быть равно 1.");
-        }
-
-        if (showSuccess) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Ключи корректны. Вектор проверки: e*d mod (n-1) = 1 при n = " + nVal + '.',
-                    "Проверка ключей",
-                    JOptionPane.INFORMATION_MESSAGE
-            );
-        }
-
-        return new KeySet(eVal, dVal, nVal, phi);
-    }
-
     private void generateKeys() {
-        BigInteger nVal = BigInteger.probablePrime(12, random);
-        BigInteger phi = nVal.subtract(BigInteger.ONE);
-
-        BigInteger eVal;
-        do {
-            eVal = new BigInteger(phi.bitLength(), random);
-            if (eVal.compareTo(BigInteger.TWO) < 0) {
-                eVal = eVal.add(BigInteger.TWO);
-            }
-            eVal = eVal.mod(phi);
-            if (eVal.compareTo(BigInteger.TWO) < 0) {
-                eVal = eVal.add(BigInteger.TWO);
-            }
-        } while (!eVal.gcd(phi).equals(BigInteger.ONE));
-
-        BigInteger dVal = eVal.modInverse(phi);
-
-        eField.setText(eVal.toString());
-        dField.setText(dVal.toString());
-        nField.setText(nVal.toString());
+        KeySet keySet = KeyGenerator.generate(random);
+        eField.setText(keySet.e().toString());
+        dField.setText(keySet.d().toString());
+        nField.setText(keySet.n().toString());
 
         JOptionPane.showMessageDialog(
                 this,
                 "Набор параметров сгенерирован:\n" +
-                        "n (простое) = " + nVal + '\n' +
-                        "e = " + eVal + '\n' +
-                        "d = " + dVal + '\n' +
+                        "n (простое) = " + keySet.n() + '\n' +
+                        "e = " + keySet.e() + '\n' +
+                        "d = " + keySet.d() + '\n' +
                         "Проверка: e*d mod (n-1) = 1",
                 "Параметры сгенерированы",
                 JOptionPane.INFORMATION_MESSAGE
         );
     }
-
-    private record KeySet(BigInteger e, BigInteger d, BigInteger n, BigInteger phi) {}
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
