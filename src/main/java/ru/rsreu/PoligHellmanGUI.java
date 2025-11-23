@@ -100,7 +100,7 @@ public class PoligHellmanGUI extends JFrame {
             plainTextArea.setText("");
             cipherTextArea.setText("");
         });
-        validateButton.addActionListener(e -> runKeyValidation(true));
+        validateButton.addActionListener(e -> validateKeysAction());
         generateButton.addActionListener(e -> generateKeys());
 
         JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
@@ -133,6 +133,14 @@ public class PoligHellmanGUI extends JFrame {
             List<BigInteger> blocks = BlockParser.parseBlocks(cipherTextArea.getText());
             List<BigInteger> result = PolyHellmanCipher.decrypt(blocks, keys);
             plainTextArea.setText(BlockParser.joinBlocks(result));
+        } catch (Exception ex) {
+            showError(ex.getMessage());
+        }
+    }
+
+    private void validateKeysAction() {
+        try {
+            runKeyValidation(true);
         } catch (Exception ex) {
             showError(ex.getMessage());
         }
